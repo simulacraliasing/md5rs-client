@@ -1,0 +1,40 @@
+syntax = "proto3";
+
+package md5rs;
+
+service Md5rs {
+    rpc Detect(stream DetectRequest) returns (stream DetectResponse);
+    rpc Auth(AuthRequest) returns (AuthResponse);
+}
+
+message AuthRequest {
+    string token = 1;
+}
+
+message AuthResponse {
+    bool success = 1;
+}
+
+message DetectRequest {
+    string uuid = 1;
+    bytes image = 2;
+    int32 width = 3;
+    int32 height = 4;
+    float iou = 5;
+    float score = 6;
+}
+
+message DetectResponse {
+    string uuid = 1;
+    repeated string label = 2;
+    repeated Bbox bboxs = 3;
+}
+
+message Bbox {
+    float x1 = 1;
+    float y1 = 2;
+    float x2 = 3;
+    float y2 = 4;
+    int32 class = 5;
+    float score = 6;
+}

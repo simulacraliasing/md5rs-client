@@ -1,18 +1,10 @@
 [package]
-name = "md5rs-server"
+name = "md5rs-client"
 version = "0.1.0"
 edition = "2021"
 
-[[bin]]
-name = "md5rs-server"
-path = "src/server.rs"
-
-[[bin]]
-name = "md5rs-client"
-path = "src/client.rs"
-
 [dependencies]
-tonic = "0.12"
+tonic = { version = "0.12", features = ["zstd"] }
 prost = "0.13"
 tokio = { version = "1.0", features = [
     "rt-multi-thread",
@@ -24,6 +16,33 @@ tokio-stream = "0.1"
 crossbeam = "0.8.4"
 async-stream = "0.3.6"
 uuid = { version = "1.11.0", features = ["v4"] }
+ffmpeg-sidecar = "1.2.0"
+image = "0.25.4"
+jpeg-decoder = "0.3.1"
+tracing = "0.1.40"
+tracing-appender = "0.2.3"
+tracing-error = "0.2.0"
+tracing-subscriber = { version = "0.3.18", features = [
+    "std",
+    "local-time",
+    "env-filter",
+] }
+walkdir = "2.5.0"
+anyhow = "1.0.90"
+chrono = { version = "0.4.38", features = ["serde"] }
+clap = { version = "4.5.20", features = ["derive"] }
+crossbeam-channel = "0.5.13"
+csv = "1.3.0"
+fast_image_resize = { version = "5.0.0", features = ["rayon"] }
+serde = { version = "1.0.210", features = ["derive"] }
+serde_json = "1.0.132"
+thiserror = "1.0.64"
+nom-exif = "2.1.0"
+rayon = "1.10.0"
+indicatif = { version = "0.17.8", features = ["rayon"] }
+webp = "0.3.0"
+toml = "0.8.19"
+itertools = "0.13.0"
 
 [build-dependencies]
 tonic-build = "0.12"
