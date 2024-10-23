@@ -9,8 +9,12 @@ use clap::{Parser, ValueEnum};
 use crossbeam_channel::{bounded, unbounded};
 use indicatif::{ParallelProgressIterator, ProgressBar, ProgressStyle};
 use rayon::prelude::*;
-use tonic::{transport::Channel, Request};
+use tonic::{
+    transport::{Certificate, Channel, ClientTlsConfig},
+    Request,
+};
 use tracing::{error, info};
+use url::Url;
 use uuid::Uuid;
 
 use md5rs::md5rs_client::Md5rsClient;
@@ -39,14 +43,18 @@ struct Args {
     folder: String,
 
     /// grpc url
-    #[arg(short, long)]
+    #[arg(short, long, default_value = "https://md5rs.hinature.cn")]
     url: String,
+
+    /// certificate path
+    #[arg(long, default_value = "certs/cert.pem")]
+    cert: String,
 
     /// Access token
     #[arg(short, long)]
     token: String,
 
-    #[arg(long)]
+    #[arg(long, default_value = "3")]
     max_frames: Option<usize>,
 
     #[arg(long, short, default_value_t = true)]
@@ -60,7 +68,7 @@ struct Args {
     #[arg(long, default_value_t = 0.2)]
     conf: f32,
 
-    /// NMS confidence threshold
+    /// Webp encode quality
     #[arg(long, default_value_t = 70f32)]
     quality: f32,
 
@@ -69,11 +77,11 @@ struct Args {
     export: ExportFormat,
 
     /// log level
-    #[arg(long, default_value_t = String::from("info"))]
+    #[arg(long, default_value = "info")]
     log_level: String,
 
     /// log file
-    #[arg(long, default_value_t = String::from("md5rs.log"))]
+    #[arg(long, default_value = "md5rs.log")]
     log_file: String,
 
     /// checkpoint interval.
@@ -108,10 +116,22 @@ enum ExportFormat {
 
 #[tokio::main]
 async fn run(args: Args) -> Result<()> {
-    let url = args.url.clone();
+    let url = Url::parse(&args.url)?;
+
+    let host = url.host_str().unwrap();
+
+    let cert_path = Path::new(&args.cert);
+
+    let pem = std::fs::read_to_string(cert_path)?;
+    let ca = Certificate::from_pem(pem);
+
+    let tls = ClientTlsConfig::new().ca_certificate(ca).domain_name(host);
 
     // Create a channel to the server
-    let channel = Channel::from_shared(url)?.connect().await?;
+    let channel = Channel::from_shared(url.to_string())?
+        .tls_config(tls)?
+        .connect()
+        .await?;
 
     // Create a client
     let mut client = Md5rsClient::new(channel);

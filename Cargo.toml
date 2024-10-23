@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-tonic = { version = "0.12" }
+tonic = { version = "0.12", features = ["tls"] }
 prost = "0.13"
 tokio = { version = "1.0", features = [
     "rt-multi-thread",
@@ -13,7 +13,6 @@ tokio = { version = "1.0", features = [
     "time",
 ] }
 tokio-stream = "0.1"
-crossbeam = "0.8.4"
 async-stream = "0.3.6"
 uuid = { version = "1.11.0", features = ["v4"] }
 ffmpeg-sidecar = "1.2.0"
@@ -43,9 +42,11 @@ indicatif = { version = "0.17.8", features = ["rayon"] }
 webp = "0.3.0"
 toml = "0.8.19"
 itertools = "0.13.0"
+url = "2.5.2"
 
 [build-dependencies]
 tonic-build = "0.12"
 
 [profile.release]
 lto = true
+strip = true
