@@ -1,5 +1,4 @@
 /target
 /logs
 *.code-workspace
-/certs
 /dist
