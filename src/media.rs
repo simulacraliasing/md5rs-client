@@ -31,6 +31,9 @@ pub enum MediaError {
 
     #[error("Failed to decode: {0}")]
     VideoDecodeError(String),
+
+    #[error("Failed to encode: {0}")]
+    WebpEncodeError(String),
 }
 
 pub struct Frame {
@@ -114,7 +117,7 @@ fn decode_image(file: &FileItem) -> Result<DynamicImage> {
         .map_err(MediaError::IoError)?
         .decode()
     {
-        Ok(img) => img,
+        Ok(img) => DynamicImage::ImageRgb8(img.to_rgb8()),
         Err(_e) => {
             warn!(
                 "Failed to decode image with ImageReader. Trying jpeg_decoder. {:?}",
@@ -147,23 +150,33 @@ pub fn process_image(
 ) -> Result<()> {
     let frame_data = match decode_image(file) {
         Ok(img) => {
-            let webp = resize_encode(&img, imgsz as u32, quality, resizer)?;
+            let webp: Option<Vec<u8>> = match resize_encode(&img, imgsz as u32, quality, resizer) {
+                Ok(webp) => Some(webp),
+                Err(_e) => None,
+            };
             let shoot_time: Option<DateTime<Local>> =
                 match get_image_date(parser, file.tmp_path.as_path()) {
                     Ok(shoot_time) => Some(shoot_time),
                     Err(_e) => None,
                 };
-            let frame_data = Frame {
-                webp,
-                file: file.clone(),
-                width: img.width() as usize,
-                height: img.height() as usize,
-                iframe_index: 0,
-                total_frames: 1,
-                shoot_time,
-            };
-
-            WebpItem::Frame(frame_data)
+            if webp.is_none() {
+                WebpItem::ErrFile(ErrFile {
+                    file: file.clone(),
+                    error: MediaError::WebpEncodeError("Failed to encode image".to_string()).into(),
+                })
+            } else {
+                let webp = webp.unwrap();
+                let frame_data = Frame {
+                    webp,
+                    file: file.clone(),
+                    width: img.width() as usize,
+                    height: img.height() as usize,
+                    iframe_index: 0,
+                    total_frames: 1,
+                    shoot_time,
+                };
+                WebpItem::Frame(frame_data)
+            }
         }
         Err(error) => WebpItem::ErrFile(ErrFile {
             file: file.clone(),
@@ -207,13 +220,19 @@ fn resize_encode(
         .resize(img, &mut resized_img, &resize_option)
         .unwrap();
 
-    let encoder = Encoder::from_image(&resized_img).unwrap();
+    let encoder = Encoder::from_image(&resized_img);
 
-    let webp = encoder.encode(quality);
-
-    let data = (&*webp).to_vec();
-
-    Ok(data)
+    match encoder {
+        Ok(encoder) => {
+            let webp = encoder.encode(quality);
+            let data = (&*webp).to_vec();
+            Ok(data)
+        }
+        Err(e) => {
+            error!("Failed to encode image: {:?}", e);
+            Err(MediaError::WebpEncodeError(e.to_string()).into())
+        }
+    }
 }
 
 pub fn process_video(
