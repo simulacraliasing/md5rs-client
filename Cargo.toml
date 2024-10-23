@@ -46,3 +46,6 @@ itertools = "0.13.0"
 
 [build-dependencies]
 tonic-build = "0.12"
+
+[profile.release]
+lto = true
