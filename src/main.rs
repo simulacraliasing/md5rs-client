@@ -107,11 +107,7 @@ enum ExportFormat {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let args: Args = Args::parse();
-
-    let guard = init_logger(args.log_level, args.log_file).expect("Failed to initialize logger");
-
+async fn run(args: Args) -> Result<()> {
     let url = args.url.clone();
 
     // Create a channel to the server
@@ -400,6 +396,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let elapsed = start.elapsed();
     info!("Elapsed time: {:?}", elapsed);
+
+    Ok(())
+}
+
+fn main() -> Result<()> {
+    let args: Args = Args::parse();
+
+    let guard = init_logger(args.log_level.clone(), args.log_file.clone())
+        .expect("Failed to initialize logger");
+
+    run(args)?;
+
     drop(guard);
 
     Ok(())
