@@ -136,26 +136,7 @@ async fn run(args: Args) -> Result<()> {
     // Create a client
     let mut client = Md5rsClient::new(channel);
 
-    // Do auth
-    let response = client
-        .auth(Request::new(AuthRequest { token: args.token }))
-        .await;
-
-    match response {
-        Ok(response) => {
-            let response = response.into_inner();
-            if response.success {
-                info!("Auth success");
-            } else {
-                error!("Auth failed");
-                std::process::exit(0);
-            }
-        }
-        Err(status) => {
-            error!("{}", status.message());
-            std::process::exit(0);
-        }
-    }
+    let session_token = auth(&mut client, &args.token).await?;
 
     let buffer_path = args.buffer_path.clone();
 
@@ -356,19 +337,29 @@ async fn run(args: Args) -> Result<()> {
         }
     };
 
-    let response = client.detect(Request::new(outbound)).await;
+    let mut request = Request::new(outbound);
+    request
+        .metadata_mut()
+        .insert("authorization", session_token.parse().unwrap());
 
-    let response = match response {
-        Ok(response) => response,
+    let response = client.detect(request).await;
+
+    let mut inbound;
+
+    match response {
+        Ok(response) => {
+            inbound = response.into_inner();
+        }
         Err(status) => {
-            error!("{}", status.message());
-            //exit
+            if status.code() == tonic::Code::Unauthenticated {
+                error!("Unauthenticated");
+            } else {
+                error!("{}", status.message());
+            }
             cleanup_buffer(&args.buffer_path)?;
             std::process::exit(0);
         }
     };
-
-    let mut inbound = response.into_inner();
 
     loop {
         let result = inbound.message().await;
@@ -431,6 +422,22 @@ fn main() -> Result<()> {
     drop(guard);
 
     Ok(())
+}
+
+async fn auth(client: &mut Md5rsClient<Channel>, token: &str) -> Result<String> {
+    let response = client
+        .auth(Request::new(AuthRequest {
+            token: token.to_string(),
+        }))
+        .await?;
+
+    let auth_response = response.into_inner();
+
+    if auth_response.success {
+        Ok(auth_response.token)
+    } else {
+        Err(anyhow::anyhow!("Auth failed"))
+    }
 }
 
 fn cleanup_buffer(buffer_path: &Option<String>) -> Result<()> {
