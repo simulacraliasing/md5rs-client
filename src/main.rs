@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use clap::{Parser, ValueEnum};
@@ -162,17 +162,6 @@ async fn run(args: Args) -> Result<()> {
 
     let folder_path = std::fs::canonicalize(folder_path)?;
 
-    // let model_config = load_model_config(&args.model).expect("Failed to load model config");
-
-    // let detect_config = Arc::new(DetectConfig {
-    //     target_size: model_config.imgsz,
-    //     class_map: model_config.class_map(),
-    //     iou_thres: args.iou,
-    //     conf_thres: args.conf,
-    //     batch_size: args.batch,
-    //     timeout: 50,
-    //     iframe: args.iframe_only,
-    // });
     let imgsz = 1280;
 
     let max_frames = args.max_frames;
@@ -351,12 +340,10 @@ async fn run(args: Args) -> Result<()> {
             inbound = response.into_inner();
         }
         Err(status) => {
-            if status.code() == tonic::Code::Unauthenticated {
-                error!("Unauthenticated");
-            } else {
-                error!("{}", status.message());
-            }
+            error!("{}", status.message());
             cleanup_buffer(&args.buffer_path)?;
+            info!("Exiting in 5 seconds");
+            thread::sleep(Duration::from_secs(5));
             std::process::exit(0);
         }
     };
@@ -388,7 +375,6 @@ async fn run(args: Args) -> Result<()> {
                     frame.label = Some(response.label);
                     export_q_s.send(frame).unwrap();
                 }
-                // debug!("RESPONSE = {:?}", response);
             }
             Ok(None) => {
                 drop(export_q_s);
@@ -396,11 +382,24 @@ async fn run(args: Args) -> Result<()> {
                     thread::sleep(std::time::Duration::from_millis(100));
                 }
                 export(&folder_path_clone, export_data_clone, &args.export)?;
+                cleanup_buffer(&args.buffer_path)?;
                 break;
             }
-            Err(e) => {
-                error!("Error: {:?}", e);
-                // break;
+            Err(status) => {
+                if status.code() == tonic::Code::Unauthenticated {
+                    error!("Unauthenticated");
+                } else if status.code() == tonic::Code::ResourceExhausted {
+                    error!("Resource exhausted");
+                } else {
+                    error!("{}", status.message());
+                }
+                drop(export_q_s);
+                while !finish_clone.lock().unwrap().clone() {
+                    thread::sleep(std::time::Duration::from_millis(100));
+                }
+                export(&folder_path_clone, export_data_clone, &args.export)?;
+                cleanup_buffer(&args.buffer_path)?;
+                break;
             }
         }
     }
