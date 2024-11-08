@@ -298,10 +298,9 @@ async fn run(args: Args) -> Result<()> {
                         };
                         let export_frame = ExportFrame {
                             file: frame.file.clone(),
-                            frame_index: frame.iframe_index,
+                            frame_index: frame.frame_index,
                             shoot_time,
                             total_frames: frame.total_frames,
-                            is_iframe: args.iframe_only,
                             bboxes: None,
                             label: None,
                             error: None,
@@ -316,7 +315,6 @@ async fn run(args: Args) -> Result<()> {
                         frame_index: 0,
                         shoot_time: None,
                         total_frames: 0,
-                        is_iframe: false,
                         bboxes: None,
                         label: None,
                         error: Some(file.error.to_string()),

@@ -28,7 +28,6 @@ pub struct ExportFrame {
     pub shoot_time: Option<String>,
     pub frame_index: usize,
     pub total_frames: usize,
-    pub is_iframe: bool,
     pub bboxes: Option<Vec<Bbox>>,
     pub label: Option<Vec<String>>,
     pub error: Option<String>,
@@ -53,7 +52,6 @@ pub fn parse_export_csv<P: AsRef<Path>>(csv: P) -> Result<Vec<ExportFrame>> {
             shoot_time: Some(frame[3].to_string()),
             frame_index: frame[4].parse::<_>()?,
             total_frames: frame[5].parse::<_>()?,
-            is_iframe: frame[6].parse::<bool>()?,
             bboxes,
             label: Some(
                 frame[8]
@@ -117,7 +115,6 @@ fn write_csv(export_data: &Vec<ExportFrame>, folder_path: &PathBuf) -> Result<()
         "shoot_time",
         "frame_index",
         "total_frames",
-        "is_iframe",
         "bboxes",
         "label",
         "error",
@@ -139,7 +136,6 @@ fn write_csv(export_data: &Vec<ExportFrame>, folder_path: &PathBuf) -> Result<()
                 .as_str(),
             export_frame.frame_index.to_string().as_str(),
             export_frame.total_frames.to_string().as_str(),
-            export_frame.is_iframe.to_string().as_str(),
             serde_json::to_string(&export_frame.bboxes)
                 .unwrap_or("".to_string())
                 .as_str(),

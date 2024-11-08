@@ -8,9 +8,9 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, Local};
 use crossbeam_channel::Sender;
 use fast_image_resize::{ResizeAlg, ResizeOptions, Resizer};
-use ffmpeg_sidecar::child::FfmpegChild;
 use ffmpeg_sidecar::command::FfmpegCommand;
-use ffmpeg_sidecar::event::{FfmpegEvent, LogLevel, OutputVideoFrame};
+use ffmpeg_sidecar::event::{FfmpegEvent, LogLevel};
+use ffmpeg_sidecar::iter::FfmpegIterator;
 use image::{DynamicImage, GenericImageView, ImageReader};
 use jpeg_decoder::Decoder;
 use nom_exif::{Exif, ExifIter, ExifTag, MediaParser, MediaSource};
@@ -34,6 +34,9 @@ pub enum MediaError {
 
     #[error("Failed to encode: {0}")]
     WebpEncodeError(String),
+
+    #[error("Ffmpeg error when decoding {1}: {0}")]
+    FfmpegError(String, String),
 }
 
 pub struct Frame {
@@ -41,7 +44,7 @@ pub struct Frame {
     pub webp: Vec<u8>,
     pub width: usize,
     pub height: usize,
-    pub iframe_index: usize,
+    pub frame_index: usize,
     pub total_frames: usize,
     pub shoot_time: Option<DateTime<Local>>,
 }
@@ -171,7 +174,7 @@ pub fn process_image(
                     file: file.clone(),
                     width: img.width() as usize,
                     height: img.height() as usize,
-                    iframe_index: 0,
+                    frame_index: 0,
                     total_frames: 1,
                     shoot_time,
                 };
@@ -244,19 +247,19 @@ pub fn process_video(
     array_q_s: Sender<WebpItem>,
 ) -> Result<()> {
     let video_path = file.tmp_path.to_string_lossy();
-    let input = create_ffmpeg_command(&video_path, imgsz, iframe)?;
+    let input = create_ffmpeg_iter(&video_path, imgsz, iframe)?;
 
     handle_ffmpeg_output(input, array_q_s, file, quality, max_frames)?;
 
     Ok(())
 }
 
-fn create_ffmpeg_command(video_path: &str, imgsz: usize, iframe: bool) -> Result<FfmpegChild> {
+fn create_ffmpeg_iter(video_path: &str, imgsz: usize, iframe: bool) -> Result<FfmpegIterator> {
     let mut ffmpeg_command = FfmpegCommand::new();
     if iframe {
         ffmpeg_command.args(["-skip_frame", "nokey"]);
     }
-    let command = ffmpeg_command
+    let iter = ffmpeg_command
         .input(video_path)
         .args(&[
             "-an",
@@ -273,97 +276,80 @@ fn create_ffmpeg_command(video_path: &str, imgsz: usize, iframe: bool) -> Result
             "vfr",
         ])
         .output("-")
-        .spawn()?;
-    Ok(command)
-}
-
-fn decode_video(
-    mut input: FfmpegChild,
-) -> Result<(Vec<OutputVideoFrame>, Option<usize>, Option<usize>)> {
-    let mut width = None;
-    let mut height = None;
-    let mut frames = vec![];
-
-    for e in input.iter()? {
-        match e {
-            FfmpegEvent::Log(LogLevel::Error, e) => {
-                if e.contains("decode_slice_header error")
-                    || e.contains("Frame num change")
-                    || e.contains("error while decoding MB")
-                {
-                    continue;
-                } else {
-                    return Err(MediaError::VideoDecodeError(e).into());
-                }
-            }
-            FfmpegEvent::ParsedInputStream(i) => {
-                if i.stream_type.to_lowercase() == "video" {
-                    width = Some(i.width as usize);
-                    height = Some(i.height as usize);
-                }
-            }
-            FfmpegEvent::OutputFrame(f) => {
-                frames.push(f);
-            }
-            _ => {}
-        }
-    }
-
-    Ok((frames, width, height))
+        .spawn()?
+        .iter()?;
+    Ok(iter)
 }
 
 fn handle_ffmpeg_output(
-    input: FfmpegChild,
+    input: FfmpegIterator,
     s: Sender<WebpItem>,
     file: &FileItem,
     quality: f32,
     max_frames: Option<usize>,
 ) -> Result<()> {
-    match decode_video(input) {
-        Ok((frames, width, height)) => {
-            let (sampled_frames, sampled_indexes) =
-                sample_evenly(&frames, max_frames.unwrap_or(frames.len()));
+    let file_path = file.file_path.to_string_lossy().into_owned();
 
-            let shoot_time: Option<DateTime<Local>> = match get_video_date(&file.tmp_path.as_path())
-            {
-                Ok(shoot_time) => Some(shoot_time),
-                Err(_e) => None,
-            };
-
-            //calculate ratio and padding
-            let width = width.expect("Failed to get video width");
-            let height = height.expect("Failed to get video height");
-
-            let frames_length = sampled_frames.len();
-
-            for (f, i) in sampled_frames.into_iter().zip(sampled_indexes.into_iter()) {
-                let encoder = Encoder::from_rgb(&f.data, f.width, f.height);
-
-                let webp = encoder.encode(quality);
-
-                let webp = (&*webp).to_vec();
-
-                let frame_data = WebpItem::Frame(Frame {
-                    webp,
-                    file: file.clone(),
-                    width,
-                    height,
-                    iframe_index: i,
-                    total_frames: frames_length,
-                    shoot_time,
-                });
-                s.send(frame_data).expect("Send video frame failed");
+    let mut frames = Vec::new();
+    let mut ffmpeg_error = Vec::new();
+    for event in input {
+        match event {
+            FfmpegEvent::Error(e) | FfmpegEvent::Log(LogLevel::Error, e) => {
+                ffmpeg_error.push(e);
             }
+            FfmpegEvent::OutputFrame(frame) => {
+                frames.push(frame);
+            }
+            _ => (),
         }
-        Err(error) => {
-            let frame_data = WebpItem::ErrFile(ErrFile {
+    }
+
+    for e in ffmpeg_error {
+        let error = MediaError::FfmpegError(e, file_path.clone());
+        warn!("{:?}", error);
+    }
+
+    if frames.is_empty() {
+        let error = MediaError::VideoDecodeError(file_path).into();
+        error!("{:?}", error);
+        let frame_data = WebpItem::ErrFile(ErrFile {
+            file: file.clone(),
+            error,
+        });
+        s.send(frame_data).expect("Send video frame failed");
+    } else {
+        let sampled_frames = sample_evenly(&frames, max_frames.unwrap_or(frames.len()));
+
+        let shoot_time: Option<DateTime<Local>> = match get_video_date(&file.tmp_path.as_path()) {
+            Ok(shoot_time) => Some(shoot_time),
+            Err(_e) => None,
+        };
+
+        //calculate ratio and padding
+        let width = frames[0].width as usize;
+        let height = frames[0].height as usize;
+
+        let frames_length = sampled_frames.len();
+
+        for f in sampled_frames.into_iter() {
+            let encoder = Encoder::from_rgb(&f.data, f.width, f.height);
+
+            let webp = encoder.encode(quality);
+
+            let webp = (&*webp).to_vec();
+
+            let frame_data = WebpItem::Frame(Frame {
+                webp,
                 file: file.clone(),
-                error,
+                width,
+                height,
+                frame_index: f.frame_num as usize,
+                total_frames: frames_length,
+                shoot_time,
             });
             s.send(frame_data).expect("Send video frame failed");
         }
     }
-
     Ok(())
 }
 
