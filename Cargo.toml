@@ -41,7 +41,7 @@ rayon = "1.10.0"
 indicatif = { version = "0.17.8", features = ["rayon"] }
 webp = "0.3.0"
 toml = "0.8.19"
-itertools = "0.13.0"
+itertools = "0.14.0"
 url = "2.5.2"
 
 [build-dependencies]
