@@ -1,7 +1,18 @@
 use std::collections::HashSet;
+use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::net::TcpStream;
 
+use anyhow::Result;
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+use rustls::ClientConfig;
+use rustls::RootCertStore;
+use rustls_native_certs::load_native_certs;
+use rustls_pki_types::{CertificateDer, ServerName};
 use serde::{Deserialize, Serialize};
+use tracing::error;
+use url::Url;
 use walkdir::{DirEntry, WalkDir};
 
 pub fn sample_evenly<T: Clone>(list: &[T], sample_size: usize) -> Vec<T> {
@@ -104,4 +115,73 @@ fn is_video_photo(path: &Path) -> bool {
     } else {
         false
     }
+}
+
+pub fn get_tls_certificate(url_str: &str) -> Result<String> {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    // Parse the URL to extract domain
+    let url = Url::parse(url_str)?;
+    let domain_str = url
+        .host_str()
+        .ok_or_else(|| anyhow::anyhow!("No host in URL"))?;
+    let domain = domain_str.to_string();
+    let port = url.port().unwrap_or(443);
+
+    let server_name = ServerName::try_from(domain.clone())?;
+
+    // Load root certificates from the system
+    let mut root_store = RootCertStore::empty();
+    let native_certs = load_native_certs();
+    for cert in native_certs.certs {
+        root_store.add(cert)?;
+    }
+
+    let config = ClientConfig::builder()
+        .with_root_certificates(root_store)
+        .with_no_client_auth();
+
+    let mut client = rustls::ClientConnection::new(Arc::new(config), server_name)?;
+
+    let mut stream = TcpStream::connect(format!("{}:{}", domain, port))?;
+    let mut tls_stream = rustls::Stream::new(&mut client, &mut stream);
+
+    // Write HTTP request
+    tls_stream.write_all(
+        format!(
+            "GET {} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n\r\n",
+            url.path(),
+            domain
+        )
+        .as_bytes(),
+    )?;
+    let mut pem = String::new();
+    // Get certificate information
+    if let Some(certs) = tls_stream.conn.peer_certificates() {
+        for cert in certs.iter() {
+            let pem_content = cert_to_pem(cert)?;
+            pem.push_str(&pem_content);
+        }
+    } else {
+        error!("No certificate found for {}", domain);
+    }
+
+    Ok(pem)
+}
+
+fn cert_to_pem(cert: &CertificateDer<'_>) -> Result<String> {
+    // Convert the certificate data to base64
+    let b64_data = BASE64.encode(cert.as_ref());
+
+    // Format with PEM headers and line wrapping (64 characters per line)
+    let mut pem_content = String::from("-----BEGIN CERTIFICATE-----\n");
+
+    // Add base64 data with line breaks every 64 characters
+    for chunk in b64_data.as_bytes().chunks(64) {
+        pem_content.push_str(&String::from_utf8_lossy(chunk));
+        pem_content.push('\n');
+    }
+
+    pem_content.push_str("-----END CERTIFICATE-----\n");
+
+    Ok(pem_content)
 }

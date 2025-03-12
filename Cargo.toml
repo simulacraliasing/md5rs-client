@@ -43,9 +43,14 @@ webp = "0.3.0"
 toml = "0.8.19"
 itertools = "0.14.0"
 url = "2.5.2"
+base64 = "0.22.1"
+rustls = "0.23.23"
+rustls-native-certs = "0.8.1"
+rustls-pki-types = "1.11.0"
 
 [build-dependencies]
 tonic-build = "0.12"
+ffmpeg-sidecar = "2.0.2"
 
 [profile.release]
 lto = true

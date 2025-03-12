@@ -66,6 +66,7 @@ pub fn media_worker(
     iframe: bool,
     max_frames: Option<usize>,
     array_q_s: Sender<WebpItem>,
+    progress_sender: Sender<usize>,
 ) {
     let mut parser = MediaParser::new();
     let mut resizer = Resizer::new();
@@ -84,6 +85,7 @@ pub fn media_worker(
             remove_file_with_retries(&file.tmp_path, 3, Duration::from_secs(1))
                 .expect("Failed to remove file");
         }
+        progress_sender.send(1).expect("Send progress failed");
     }
 }
 
